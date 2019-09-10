@@ -16,6 +16,11 @@ import (
 
 var keyGUID = []byte("258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
 
+/*
+这个challengeKey由客户端header字段Sec-WebSocket-Key来进行构造，通过和字符串
+"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"拼接在一起进行SHA-1哈希运算，
+得到一个20字节的值，然后对这20字节进行base64编码
+*/
 func computeAcceptKey(challengeKey string) string {
 	h := sha1.New()
 	h.Write([]byte(challengeKey))

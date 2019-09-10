@@ -41,43 +41,49 @@ const (
 )
 
 // Close codes defined in RFC 6455, section 11.7.
+// 连接关闭状态码   websocket协议文档中定义
 const (
-	CloseNormalClosure           = 1000
-	CloseGoingAway               = 1001
-	CloseProtocolError           = 1002
-	CloseUnsupportedData         = 1003
-	CloseNoStatusReceived        = 1005
-	CloseAbnormalClosure         = 1006
-	CloseInvalidFramePayloadData = 1007
-	ClosePolicyViolation         = 1008
-	CloseMessageTooBig           = 1009
-	CloseMandatoryExtension      = 1010
-	CloseInternalServerErr       = 1011
+	CloseNormalClosure           = 1000 // 表示一个正常的关闭，意味着连接建立的目标已经完成了。
+	CloseGoingAway               = 1001 // 表示终端已经“走开”，例如服务器停机了或者在浏览器中离开了这个页面。
+	CloseProtocolError           = 1002 // 表示终端由于协议错误中止了连接。
+	CloseUnsupportedData         = 1003 // 表示终端由于收到了一个不支持的数据类型的数据（如终端只能怪理解文本数据，但是收到了一个二进制数据）从而关闭连接。
+	CloseNoStatusReceived        = 1005 // 一个保留值并且不能被终端当做一个关闭帧的状态码。这个状态码是为了给上层应用表示当前没有状态码。
+	CloseAbnormalClosure         = 1006 // 一个保留值并且不能被终端当做一个关闭帧的状态码。这个状态码是为了给上层应用表示连接被异常关闭如没有发送或者接受一个关闭帧这种场景的使用而设计的。
+	CloseInvalidFramePayloadData = 1007 // 表示终端因为收到了类型不连续的消息（如非 UTF-8 编码的文本消息）导致的连接关闭。
+	ClosePolicyViolation         = 1008 // 表示终端是因为收到了一个违反政策的消息导致的连接关闭。这是一个通用的状态码，可以在没有什么合适的状态码（如 1003 或者 1009）时或者可能需要隐藏关于政策的具体信息时返回。
+	CloseMessageTooBig           = 1009 // 表示终端由于收到了一个太大的消息无法进行处理从而关闭连接。
+	CloseMandatoryExtension      = 1010 // 表示终端（客户端）因为预期与服务端协商一个或者多个扩展，但是服务端在 WebSocket 握手中没有响应这个导致的关闭。需要的扩展清单应该出现在关闭帧的原因（reason）字段中。
+	CloseInternalServerErr       = 1011 // 表示服务端因为遇到了一个意外的条件阻止它完成这个请求从而导致连接关闭。
 	CloseServiceRestart          = 1012
 	CloseTryAgainLater           = 1013
-	CloseTLSHandshake            = 1015
+	CloseTLSHandshake            = 1015 //  是一个保留值，不能被终端设置到关闭帧的状态码中。这个状态码是用于上层应用来表示连接失败是因为 TLS 握手失败（如服务端证书没有被验证过）导致的关闭的。
 )
 
 // The message types are defined in RFC 6455, section 11.8.
 const (
 	// TextMessage denotes a text data message. The text message payload is
 	// interpreted as UTF-8 encoded text data.
+	// 文本消息类型  utf-8编码
 	TextMessage = 1
 
 	// BinaryMessage denotes a binary data message.
+	// 二进制消息
 	BinaryMessage = 2
 
 	// CloseMessage denotes a close control message. The optional message
 	// payload contains a numeric code and text. Use the FormatCloseMessage
 	// function to format a close message payload.
+	// 连接关闭消息
 	CloseMessage = 8
 
 	// PingMessage denotes a ping control message. The optional message payload
 	// is UTF-8 encoded text.
+	// ping消息
 	PingMessage = 9
 
 	// PongMessage denotes a pong control message. The optional message payload
 	// is UTF-8 encoded text.
+	// pong消息
 	PongMessage = 10
 )
 
@@ -180,6 +186,7 @@ var (
 	errInvalidControlFrame = errors.New("websocket: invalid control frame")
 )
 
+// 生成payload掩码
 func newMaskKey() [4]byte {
 	n := rand.Uint32()
 	return [4]byte{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)}
@@ -192,14 +199,17 @@ func hideTempErr(err error) error {
 	return err
 }
 
+// 判断消息是否为控制帧
 func isControl(frameType int) bool {
 	return frameType == CloseMessage || frameType == PingMessage || frameType == PongMessage
 }
 
+// 判断消息是否为数据帧
 func isData(frameType int) bool {
 	return frameType == TextMessage || frameType == BinaryMessage
 }
 
+// 当前可用状态码   关闭状态码
 var validReceivedCloseCodes = map[int]bool{
 	// see http://www.iana.org/assignments/websocket/websocket.xhtml#close-code-number
 
@@ -219,6 +229,7 @@ var validReceivedCloseCodes = map[int]bool{
 	CloseTLSHandshake:            false,
 }
 
+// 判断接收到的关闭code是否合法
 func isValidReceivedCloseCode(code int) bool {
 	return validReceivedCloseCodes[code] || (code >= 3000 && code <= 4999)
 }
@@ -239,20 +250,20 @@ type writePoolData struct{ buf []byte }
 
 // The Conn type represents a WebSocket connection.
 type Conn struct {
-	conn        net.Conn
-	isServer    bool
-	subprotocol string
+	conn        net.Conn // 底层tcp连接实例  从http hijack 拿到
+	isServer    bool     // mask相关  客户端发往服务端的帧payload需要掩码
+	subprotocol string   // 连接实例所使用的子协议
 
 	// Write fields
-	mu            chan bool // used as mutex to protect write to conn
-	writeBuf      []byte    // frame is constructed in this buffer.
+	mu            chan bool // used as mutex to protect write to conn 写操作保护
+	writeBuf      []byte    // frame is constructed in this buffer. 写缓冲区
 	writePool     BufferPool
 	writeBufSize  int
 	writeDeadline time.Time
 	writer        io.WriteCloser // the current writer returned to the application
 	isWriting     bool           // for best-effort concurrent write detection
 
-	writeErrMu sync.Mutex
+	writeErrMu sync.Mutex // writeerr字段锁
 	writeErr   error
 
 	enableWriteCompression bool
@@ -260,9 +271,10 @@ type Conn struct {
 	newCompressionWriter   func(io.WriteCloser, int) io.WriteCloser
 
 	// Read fields
+	// 返回给上层read方法
 	reader  io.ReadCloser // the current reader returned to the application
 	readErr error
-	br      *bufio.Reader
+	br      *bufio.Reader // 读
 	// bytes remaining in current frame.
 	// set setReadRemaining to safely update this value and prevent overflow
 	readRemaining int64
@@ -275,6 +287,7 @@ type Conn struct {
 	handlePing    func(string) error
 	handleClose   func(int, string) error
 	readErrCount  int
+	// 实现read方法，调用br的read方法
 	messageReader *messageReader // the current low-level reader
 
 	readDecompress         bool // whether last read frame had RSV1 set
@@ -282,14 +295,17 @@ type Conn struct {
 }
 
 func newConn(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int, writeBufferPool BufferPool, br *bufio.Reader, writeBuf []byte) *Conn {
-
+	// 如果hajacked的buffer reader为nil
 	if br == nil {
+		// 如果指定了websocket连接的readbuffersize
 		if readBufferSize == 0 {
 			readBufferSize = defaultReadBufferSize
 		} else if readBufferSize < maxControlFramePayloadSize {
 			// must be large enough for control frame
+			// readbuffer最少能够存的下一个完整的控制帧
 			readBufferSize = maxControlFramePayloadSize
 		}
+		// 为连接创建一个bufferreader
 		br = bufio.NewReaderSize(conn, readBufferSize)
 	}
 
@@ -297,11 +313,12 @@ func newConn(conn net.Conn, isServer bool, readBufferSize, writeBufferSize int, 
 		writeBufferSize = defaultWriteBufferSize
 	}
 	writeBufferSize += maxFrameHeaderSize
-
+	// 写缓冲区
 	if writeBuf == nil && writeBufferPool == nil {
 		writeBuf = make([]byte, writeBufferSize)
 	}
 
+	// 写控制  每帧数据写完后会发送 mu<- true 释放控制权
 	mu := make(chan bool, 1)
 	mu <- true
 	c := &Conn{
@@ -371,14 +388,19 @@ func (c *Conn) read(n int) ([]byte, error) {
 	if err == io.EOF {
 		err = errUnexpectedEOF
 	}
+	// 读完n个字节后将这n字节数据从读缓冲区中丢弃
 	c.br.Discard(len(p))
 	return p, err
 }
 
+// 向对端写数据
 func (c *Conn) write(frameType int, deadline time.Time, buf0, buf1 []byte) error {
+	// 获取写锁
 	<-c.mu
+	// 退出释放写锁
 	defer func() { c.mu <- true }()
 
+	// 获取上次写结果，如果有错误直接返回
 	c.writeErrMu.Lock()
 	err := c.writeErr
 	c.writeErrMu.Unlock()
@@ -386,15 +408,17 @@ func (c *Conn) write(frameType int, deadline time.Time, buf0, buf1 []byte) error
 		return err
 	}
 
+	// 设置写超时，写数据
 	c.conn.SetWriteDeadline(deadline)
 	if len(buf1) == 0 {
 		_, err = c.conn.Write(buf0)
 	} else {
 		err = c.writeBufs(buf0, buf1)
 	}
-	if err != nil {
+	if err != nil { // 写错误，设置writeErr
 		return c.writeFatal(err)
 	}
+	// 设置关闭错误
 	if frameType == CloseMessage {
 		c.writeFatal(ErrCloseSent)
 	}
@@ -407,12 +431,19 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	if !isControl(messageType) {
 		return errBadWriteOpCode
 	}
+	// 判断数据是否超过控制帧的payload
 	if len(data) > maxControlFramePayloadSize {
 		return errInvalidControlFrame
 	}
 
+	// 控制帧第一个字节   10000000 | msgtype
+	//close： 10000000 | 0x8 = 10001000
+	// ping: 10000000 | 0x9 = 10001001
+	// pong: 10000000 | 0xA = 10001010
 	b0 := byte(messageType) | finalBit
+	// 第二个字节  低7位写入payload长度
 	b1 := byte(len(data))
+	// 服务端发向客户端的数据不需要掩码
 	if !c.isServer {
 		b1 |= maskBit
 	}
@@ -421,22 +452,26 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	buf = append(buf, b0, b1)
 
 	if c.isServer {
+		// 服务端发向客户端  不需要掩码 直接拷贝payload
 		buf = append(buf, data...)
 	} else {
+		// 客户端发向服务端需要掩码
 		key := newMaskKey()
 		buf = append(buf, key[:]...)
 		buf = append(buf, data...)
+		// 控制帧带掩码 6个字节 只异或payload
 		maskBytes(key, 0, buf[6:])
 	}
 
 	d := time.Hour * 1000
 	if !deadline.IsZero() {
-		d = deadline.Sub(time.Now())
+		d = deadline.Sub(time.Now()) // 超时时间
 		if d < 0 {
 			return errWriteTimeout
 		}
 	}
 
+	// 等待d，如果没能从mu chan中读到数据说明在超时时间内没能拿到写控制权，返回写超时
 	timer := time.NewTimer(d)
 	select {
 	case <-c.mu:
@@ -444,15 +479,17 @@ func (c *Conn) WriteControl(messageType int, data []byte, deadline time.Time) er
 	case <-timer.C:
 		return errWriteTimeout
 	}
+	// 函数退出时释放对写操作的控制
 	defer func() { c.mu <- true }()
 
+	// 获取上次写操作的错误码？？
 	c.writeErrMu.Lock()
 	err := c.writeErr
 	c.writeErrMu.Unlock()
 	if err != nil {
 		return err
 	}
-
+	// 设置写超时 并向客户端写数据
 	c.conn.SetWriteDeadline(deadline)
 	_, err = c.conn.Write(buf)
 	if err != nil {
@@ -473,11 +510,12 @@ func (c *Conn) beginMessage(mw *messageWriter, messageType int) error {
 		c.writer.Close()
 		c.writer = nil
 	}
-
+	// 判断消息类型是否合法
 	if !isControl(messageType) && !isData(messageType) {
 		return errBadWriteOpCode
 	}
 
+	// 获取上一次写错误
 	c.writeErrMu.Lock()
 	err := c.writeErr
 	c.writeErrMu.Unlock()
@@ -489,6 +527,7 @@ func (c *Conn) beginMessage(mw *messageWriter, messageType int) error {
 	mw.frameType = messageType
 	mw.pos = maxFrameHeaderSize
 
+	// 如果upgrader初始化时指定了writepool 且没有给writebuf分配空间
 	if c.writeBuf == nil {
 		wpd, ok := c.writePool.Get().(writePoolData)
 		if ok {
@@ -522,11 +561,14 @@ func (c *Conn) NextWriter(messageType int) (io.WriteCloser, error) {
 	return c.writer, nil
 }
 
+// 上层写方法
 type messageWriter struct {
-	c         *Conn
-	compress  bool // whether next call to flushFrame should set RSV1
-	pos       int  // end of data in writeBuf.
-	frameType int  // type of the current frame.
+	c        *Conn
+	compress bool // whether next call to flushFrame should set RSV1
+	// writebuf中数据长度
+	pos int // end of data in writeBuf.
+	// 当前帧类型
+	frameType int // type of the current frame.
 	err       error
 }
 
@@ -548,9 +590,11 @@ func (w *messageWriter) endMessage(err error) error {
 // final argument indicates that this is the last frame in the message.
 func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 	c := w.c
+	// payload长度
 	length := w.pos - maxFrameHeaderSize + len(extra)
 
 	// Check for invalid control frames.
+	// 控制帧 final==true length<125
 	if isControl(w.frameType) &&
 		(!final || length > maxControlFramePayloadSize) {
 		return w.endMessage(errInvalidControlFrame)
@@ -566,10 +610,13 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 	w.compress = false
 
 	b1 := byte(0)
+	// 客户端发向服务端 带掩码
 	if !c.isServer {
 		b1 |= maskBit
 	}
 
+	// 帧头长度有可能小于2+8+4，如果是服务端发向客户端的数据则不需要掩码，framePos向后移4个字节
+	// 使用framePos可以使帧头和payload数据紧接在一起
 	// Assume that the frame starts at beginning of c.writeBuf.
 	framePos := 0
 	if c.isServer {
@@ -577,6 +624,9 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 		framePos = 4
 	}
 
+	// payload长度大于65535，则payload长度需要使用8bytes（无符号整型）来存储，如果是服务端发向客户端
+	// 则不需要掩码，使用只需要使用writeBuf中前maxFrameHeaderSize字节的后(maxFrameHeaderSize-4)个字节
+	// 其他长度以此类推
 	switch {
 	case length >= 65536:
 		c.writeBuf[framePos] = b0
@@ -595,8 +645,11 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 
 	if !c.isServer {
 		key := newMaskKey()
+		// 如果需要掩码   掩码位置位于payload前4个字节
 		copy(c.writeBuf[maxFrameHeaderSize-4:], key[:])
+		// 对payload数据进行异或计算
 		maskBytes(key, 0, c.writeBuf[maxFrameHeaderSize:w.pos])
+		// 客户端发向服务端，帧数据长度大于buf长度 报错     客户端分片数据长度不能大于buf长度
 		if len(extra) > 0 {
 			return w.endMessage(c.writeFatal(errors.New("websocket: internal error, extra used in client mode")))
 		}
@@ -621,13 +674,14 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 	if err != nil {
 		return w.endMessage(err)
 	}
-
+	// 数据片段最后一帧写完
 	if final {
-		w.endMessage(errWriteClosed)
+		w.endMessage(errWriteClosed) // ???
 		return nil
 	}
 
 	// Setup for next frame.
+	// 数据片段还有后续帧
 	w.pos = maxFrameHeaderSize
 	w.frameType = continuationFrame
 	return nil
@@ -635,12 +689,14 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 
 func (w *messageWriter) ncopy(max int) (int, error) {
 	n := len(w.c.writeBuf) - w.pos
+	// writebuf填充满后发送给对端
 	if n <= 0 {
 		if err := w.flushFrame(false, nil); err != nil {
 			return 0, err
 		}
 		n = len(w.c.writeBuf) - w.pos
 	}
+	// 返回writebuf中剩余的空间长度
 	if n > max {
 		n = max
 	}
@@ -662,6 +718,7 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 	}
 
 	nn := len(p)
+	// 向writebuf中copy数据，copy满后ncopy中会判断，并将writebuf中的数据作为一帧数据发送出去
 	for len(p) > 0 {
 		n, err := w.ncopy(len(p))
 		if err != nil {
@@ -671,6 +728,10 @@ func (w *messageWriter) Write(p []byte) (int, error) {
 		w.pos += n
 		p = p[n:]
 	}
+	// p中的数据copy完后，writebuf中的数据不会在Write函数返回时当做一帧数据被发送出去，
+	// 此时外部可以继续调用Write方法，继续向writebuf中写入数据，当writebuf被填满时，writebuf
+	// 将作为一帧被发送出去，或者外部调用Close()方法，Close方法会将writebuf中剩余的数据当做
+	// 最后一帧数据发送出去。
 	return nn, nil
 }
 
@@ -721,6 +782,7 @@ func (w *messageWriter) Close() error {
 	if w.err != nil {
 		return w.err
 	}
+	// 将writebuf中剩余的数据最为最后一帧发送出去
 	return w.flushFrame(true, nil)
 }
 
@@ -749,7 +811,7 @@ func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 // WriteMessage is a helper method for getting a writer using NextWriter,
 // writing the message and closing the writer.
 func (c *Conn) WriteMessage(messageType int, data []byte) error {
-
+	// 服务端发向客户端 单帧
 	if c.isServer && (c.newCompressionWriter == nil || !c.enableWriteCompression) {
 		// Fast path with no allocations and single frame.
 
@@ -757,6 +819,7 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 		if err := c.beginMessage(&mw, messageType); err != nil {
 			return err
 		}
+		// writeBuf default 4096 + 2+8+4
 		n := copy(c.writeBuf[mw.pos:], data)
 		mw.pos += n
 		data = data[n:]
@@ -767,9 +830,11 @@ func (c *Conn) WriteMessage(messageType int, data []byte) error {
 	if err != nil {
 		return err
 	}
+	// 调用meeeageWriter的Write方法
 	if _, err = w.Write(data); err != nil {
 		return err
 	}
+	// 调用meeeageWriter的Close方法
 	return w.Close()
 }
 
@@ -786,7 +851,7 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 
 func (c *Conn) advanceFrame() (int, error) {
 	// 1. Skip remainder of previous frame.
-
+	// 丢弃上一帧剩余的数据
 	if c.readRemaining > 0 {
 		if _, err := io.CopyN(ioutil.Discard, c.br, c.readRemaining); err != nil {
 			return noFrame, err
@@ -794,15 +859,22 @@ func (c *Conn) advanceFrame() (int, error) {
 	}
 
 	// 2. Read and parse first two bytes of frame header.
-
+	// 读取帧的前2个字节
 	p, err := c.read(2)
 	if err != nil {
 		return noFrame, err
 	}
-
+	//  网络序 高位在左边  判断是否为消息的最后一个片段
+	// FIN为0：不是最后一帧
 	final := p[0]&finalBit != 0
+	// opcode 4bits
 	frameType := int(p[0] & 0xf)
+	// “有效负载数据”是否添加掩码  如果mask = 1 则掩码键值存在与masking-key中
+	// 这个一般用于解码“有效负载数据”。所有的从客户端发送到服务端的帧都需要设置这个bit位为1
 	mask := p[1]&maskBit != 0
+	// 以字节为单位的“有效负载数据”长度，如果值为0-125，那么就表示负载数据的长度。如果是126，
+	// 那么接下来的2个bytes解释为16bit的无符号整形作为负载数据的长度。如果是127，那么接下来
+	// 的8个bytes解释为一个64bit的无符号整形（最高位的bit必须为0）作为负载数据的长度
 	c.setReadRemaining(int64(p[1] & 0x7f))
 
 	c.readDecompress = false
@@ -810,12 +882,13 @@ func (c *Conn) advanceFrame() (int, error) {
 		c.readDecompress = true
 		p[0] &^= rsv1Bit
 	}
-
+	// RSV1，RSV2，RSV3: 每个1 bit  必须设置为0，除非扩展了非0值含义的扩展
 	if rsv := p[0] & (rsv1Bit | rsv2Bit | rsv3Bit); rsv != 0 {
 		return noFrame, c.handleProtocolError("unexpected reserved bits 0x" + strconv.FormatInt(int64(rsv), 16))
 	}
 
 	switch frameType {
+	//所有的控制帧必须有一个126字节或者更小的负载长度，并且不能被分片
 	case CloseMessage, PingMessage, PongMessage:
 		if c.readRemaining > maxControlFramePayloadSize {
 			return noFrame, c.handleProtocolError("control frame length > 125")
@@ -823,12 +896,17 @@ func (c *Conn) advanceFrame() (int, error) {
 		if !final {
 			return noFrame, c.handleProtocolError("control frame not final")
 		}
+	// 数据帧（例如非控制帧）的定义是操作码的最高位值为0。当前定义的数据帧操作吗包含0x1（文本）、0x2（二进制）。
+	// 操作码0x3-0x7是被保留作为非控制帧的操作码。
 	case TextMessage, BinaryMessage:
+		// 如果readFinal == false 进入此分支 说明出错
 		if !c.readFinal {
 			return noFrame, c.handleProtocolError("message start before final message frame")
 		}
 		c.readFinal = final
 	case continuationFrame:
+		// readFinal == false 非最后一帧 只能进入此分支
+		// 如果为最后一个片段 则会更新readFinal为true
 		if c.readFinal {
 			return noFrame, c.handleProtocolError("continuation after final message frame")
 		}
@@ -848,8 +926,9 @@ func (c *Conn) advanceFrame() (int, error) {
 	// a 64-bit unsigned integer (the most significant bit MUST be 0) are the
 	// payload length. Multibyte length quantities are expressed in network byte
 	// order.
-
+	// 设置有效负载长度
 	switch c.readRemaining {
+	// 如果是126，那么接下来的2个bytes解释为16bit的无符号整形作为负载数据的长度  网络序  大端存储
 	case 126:
 		p, err := c.read(2)
 		if err != nil {
@@ -859,6 +938,7 @@ func (c *Conn) advanceFrame() (int, error) {
 		if err := c.setReadRemaining(int64(binary.BigEndian.Uint16(p))); err != nil {
 			return noFrame, err
 		}
+	// 如果是127，那么接下来的8个bytes解释为一个64bit的无符号整形（最高位的bit必须为0）作为负载数据的长度 网络序 大端存储
 	case 127:
 		p, err := c.read(8)
 		if err != nil {
@@ -871,11 +951,12 @@ func (c *Conn) advanceFrame() (int, error) {
 	}
 
 	// 4. Handle frame masking.
-
+	// 所有的从客户端发送到服务端的帧都需要设置这个bit位为1。
 	if mask != c.isServer {
 		return noFrame, c.handleProtocolError("incorrect mask flag")
 	}
 
+	// 读取Masking-key 4bytes
 	if mask {
 		c.readMaskPos = 0
 		p, err := c.read(len(c.readMaskKey))
@@ -886,7 +967,7 @@ func (c *Conn) advanceFrame() (int, error) {
 	}
 
 	// 5. For text and binary messages, enforce read limit and return.
-
+	//	数据帧外部读取  此处只做错误判断
 	if frameType == continuationFrame || frameType == TextMessage || frameType == BinaryMessage {
 
 		c.readLength += c.readRemaining
@@ -895,7 +976,7 @@ func (c *Conn) advanceFrame() (int, error) {
 		if c.readLength < 0 {
 			return noFrame, ErrReadLimit
 		}
-
+		// 数据过大 无法处理  返回1009错误
 		if c.readLimit > 0 && c.readLength > c.readLimit {
 			c.WriteControl(CloseMessage, FormatCloseMessage(CloseMessageTooBig, ""), time.Now().Add(writeWait))
 			return noFrame, ErrReadLimit
@@ -905,15 +986,16 @@ func (c *Conn) advanceFrame() (int, error) {
 	}
 
 	// 6. Read control frame payload.
-
+	// 控制帧在此处理
 	var payload []byte
 	if c.readRemaining > 0 {
+		// 控制帧数据最多125字节
 		payload, err = c.read(int(c.readRemaining))
 		c.setReadRemaining(0)
 		if err != nil {
 			return noFrame, err
 		}
-		if c.isServer {
+		if c.isServer { // 客户端发向服务端   异或回原始数据
 			maskBytes(c.readMaskKey, 0, payload)
 		}
 	}
@@ -922,16 +1004,25 @@ func (c *Conn) advanceFrame() (int, error) {
 
 	switch frameType {
 	case PongMessage:
+		// 客户端ping消息   默认ponghandler直接返回nil
 		if err := c.handlePong(string(payload)); err != nil {
 			return noFrame, err
 		}
 	case PingMessage:
+		// 客户端ping  默认pinghandler回复客户端payload数据
 		if err := c.handlePing(string(payload)); err != nil {
 			return noFrame, err
 		}
 	case CloseMessage:
+		// 客户端关闭消息
 		closeCode := CloseNoStatusReceived
 		closeText := ""
+		/*
+			关闭帧可能包含内容（body）（帧的“应用数据”部分）来表明连接关闭的原因，例如终端的断开，
+			或者是终端收到了一个太大的帧，或者是终端收到了一个不符合预期的格式的内容。如果这个内容存在，
+			内容的前两个字节必须是一个无符号整型（按照网络字节序）来代表在7.4节中定义的状态码。跟在这两个
+			整型字节之后的可以是UTF-8编码的的数据值（原因），数据值的定义不在此文档中。
+		*/
 		if len(payload) >= 2 {
 			closeCode = int(binary.BigEndian.Uint16(payload))
 			if !isValidReceivedCloseCode(closeCode) {
@@ -942,6 +1033,7 @@ func (c *Conn) advanceFrame() (int, error) {
 				return noFrame, c.handleProtocolError("invalid utf8 payload in close frame")
 			}
 		}
+		// 默认closehandler只发送closecode
 		if err := c.handleClose(closeCode, closeText); err != nil {
 			return noFrame, err
 		}
@@ -968,6 +1060,7 @@ func (c *Conn) handleProtocolError(message string) error {
 // this method return the same error.
 func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 	// Close previous reader, only relevant for decompression.
+	// 同一时刻只能有一个上层的reader操作底层的br
 	if c.reader != nil {
 		c.reader.Close()
 		c.reader = nil
@@ -984,9 +1077,10 @@ func (c *Conn) NextReader() (messageType int, r io.Reader, err error) {
 		}
 
 		if frameType == TextMessage || frameType == BinaryMessage {
+			// 将底层read方法返回给上层
 			c.messageReader = &messageReader{c}
 			c.reader = c.messageReader
-			if c.readDecompress {
+			if c.readDecompress { // rsv1  必须设置为0，除非扩展了非0值含义的扩展。
 				c.reader = c.newDecompressionReader(c.reader)
 			}
 			return frameType, c.reader, nil
@@ -1013,7 +1107,6 @@ func (r *messageReader) Read(b []byte) (int, error) {
 	}
 
 	for c.readErr == nil {
-
 		if c.readRemaining > 0 {
 			if int64(len(b)) > c.readRemaining {
 				b = b[:c.readRemaining]
@@ -1023,6 +1116,7 @@ func (r *messageReader) Read(b []byte) (int, error) {
 			if c.isServer {
 				c.readMaskPos = maskBytes(c.readMaskKey, c.readMaskPos, b[:n])
 			}
+			// 更新剩余字节数
 			rem := c.readRemaining
 			rem -= int64(n)
 			c.setReadRemaining(rem)
@@ -1030,13 +1124,17 @@ func (r *messageReader) Read(b []byte) (int, error) {
 				c.readErr = errUnexpectedEOF
 			}
 			return n, c.readErr
-		}
+		} // 当前帧的payload读完
 
+		// 最后一帧
 		if c.readFinal {
 			c.messageReader = nil
 			return 0, io.EOF
 		}
-
+		// readFinal为false 说明还有更多帧  继续调用advanceframe读取下一帧
+		// 下一帧的帧类型只能是continueframe或者noframe(control frame 返回noframe)
+		// 之后继续读取下一帧的数据，直到该片段的数据被读取完
+		// 如果读取到的帧类型为noframe，则readRemainig==0，此时不做read操作，继续读取下一帧
 		frameType, err := c.advanceFrame()
 		switch {
 		case err != nil:
@@ -1065,6 +1163,7 @@ func (c *Conn) ReadMessage() (messageType int, p []byte, err error) {
 	if err != nil {
 		return messageType, nil, err
 	}
+	// ReadAll 调用 messageReader的read方法
 	p, err = ioutil.ReadAll(r)
 	return messageType, p, err
 }

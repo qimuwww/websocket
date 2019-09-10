@@ -23,6 +23,7 @@ func (e HandshakeError) Error() string { return e.message }
 
 // Upgrader specifies parameters for upgrading an HTTP connection to a
 // WebSocket connection.
+// 描述了将一个http连接升级为websocket连接的详细参数
 type Upgrader struct {
 	// HandshakeTimeout specifies the duration for the handshake to complete.
 	HandshakeTimeout time.Duration
@@ -84,6 +85,7 @@ func (u *Upgrader) returnError(w http.ResponseWriter, r *http.Request, status in
 }
 
 // checkSameOrigin returns true if the origin is not set or is equal to the request host.
+// 判断origin字段的host和request的host是否相同
 func checkSameOrigin(r *http.Request) bool {
 	origin := r.Header["Origin"]
 	if len(origin) == 0 {
@@ -96,6 +98,7 @@ func checkSameOrigin(r *http.Request) bool {
 	return equalASCIIFold(u.Host, r.Host)
 }
 
+// 获取客户端子协议  客户端子协议列表与服务端子协议列表相匹配
 func (u *Upgrader) selectSubprotocol(r *http.Request, responseHeader http.Header) string {
 	if u.Subprotocols != nil {
 		clientProtocols := Subprotocols(r)
@@ -120,21 +123,23 @@ func (u *Upgrader) selectSubprotocol(r *http.Request, responseHeader http.Header
 //
 // If the upgrade fails, then Upgrade replies to the client with an HTTP error
 // response.
+// 将http连接升级为websocket连接
+// 如果升级失败 upgrade将回复给客户端一个http错误
 func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header) (*Conn, error) {
 	const badHandshake = "websocket: the client is not using the websocket protocol: "
-
+	// 请求必须包含一个Connectionheader字段，它的值必须包含"Upgrade"
 	if !tokenListContainsValue(r.Header, "Connection", "upgrade") {
 		return u.returnError(w, r, http.StatusBadRequest, badHandshake+"'upgrade' token not found in 'Connection' header")
 	}
-
+	// 请求必须包含一个Upgradeheader字段，它的值必须包含"websocket"
 	if !tokenListContainsValue(r.Header, "Upgrade", "websocket") {
 		return u.returnError(w, r, http.StatusBadRequest, badHandshake+"'websocket' token not found in 'Upgrade' header")
 	}
-
+	// 请求方法必须是GET，而且HTTP的版本至少需要1.1
 	if r.Method != "GET" {
 		return u.returnError(w, r, http.StatusMethodNotAllowed, badHandshake+"request method is not GET")
 	}
-
+	// 请求必须包含一个名为Sec-WebSocket-Version的字段。这个header字段的值必须为13
 	if !tokenListContainsValue(r.Header, "Sec-Websocket-Version", "13") {
 		return u.returnError(w, r, http.StatusBadRequest, "websocket: unsupported version: 13 not found in 'Sec-Websocket-Version' header")
 	}
@@ -143,6 +148,11 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		return u.returnError(w, r, http.StatusInternalServerError, "websocket: application specific 'Sec-WebSocket-Extensions' headers are unsupported")
 	}
 
+	/*
+		如果这个请求来自一个浏览器，那么请求必须包含一个Originheader字段。如果请求是来自一个非浏览器客户端，
+		那么当该客户端这个字段的语义能够与示例中的匹配时，这个请求也可能包含这个字段。这个header字段的值为建
+		立连接的源代码的源地址ASCII序列化后的结果。
+	*/
 	checkOrigin := u.CheckOrigin
 	if checkOrigin == nil {
 		checkOrigin = checkSameOrigin
@@ -151,11 +161,18 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		return u.returnError(w, r, http.StatusForbidden, "websocket: request origin not allowed by Upgrader.CheckOrigin")
 	}
 
+	// 请求必须包含一个名为Sec-WebSocket-Key的header字段。这个header字段的值必须是由一个随机生成的16字节的随机数通过base64
+	// 编码得到的。每一个连接都必须随机的选择随机数
 	challengeKey := r.Header.Get("Sec-Websocket-Key")
 	if challengeKey == "" {
 		return u.returnError(w, r, http.StatusBadRequest, "websocket: not a websocket handshake: 'Sec-WebSocket-Key' header is missing or blank")
 	}
-
+	/*
+		这个请求可能会包含一个名为Sec-WebSocket-Protocol的header字段。如果存在这个字段，
+		那么这个值包含了一个或者多个客户端希望使用的用逗号分隔的根据权重排序的子协议。
+		这些子协议的值必须是一个非空字符串，字符的范围是U+0021到U+007E，但是不包含其中的定义在RFC2616中的分隔符，
+		并且每个协议必须是一个唯一的字符串。ABNF的这个header字段的值是在RFC2616定义了构造方法和规则的1#token。
+	*/
 	subprotocol := u.selectSubprotocol(r, responseHeader)
 
 	// Negotiate PMCE
@@ -170,6 +187,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		}
 	}
 
+	// websocket连接接管http连接
 	h, ok := w.(http.Hijacker)
 	if !ok {
 		return u.returnError(w, r, http.StatusInternalServerError, "websocket: response does not implement http.Hijacker")
@@ -180,6 +198,8 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 		return u.returnError(w, r, http.StatusInternalServerError, err.Error())
 	}
 
+	// 如果连接的读缓冲区有数据可以读取，则关闭连接。
+	// websocket握手完成前不允许客户端发送数据
 	if brw.Reader.Buffered() > 0 {
 		netConn.Close()
 		return nil, errors.New("websocket: client sent data before handshake is complete")
@@ -188,6 +208,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	var br *bufio.Reader
 	if u.ReadBufferSize == 0 && bufioReaderSize(netConn, brw.Reader) > 256 {
 		// Reuse hijacked buffered reader as connection reader.
+		// 复用http连接时的buffer
 		br = brw.Reader
 	}
 
@@ -196,6 +217,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	var writeBuf []byte
 	if u.WriteBufferPool == nil && u.WriteBufferSize == 0 && len(buf) >= maxFrameHeaderSize+256 {
 		// Reuse hijacked write buffer as connection buffer.
+		// 复用http连接时的写缓冲区
 		writeBuf = buf
 	}
 
@@ -246,6 +268,7 @@ func (u *Upgrader) Upgrade(w http.ResponseWriter, r *http.Request, responseHeade
 	p = append(p, "\r\n"...)
 
 	// Clear deadlines set by HTTP server.
+	// 清除http连接时设置的超时， hajack中提到需要由caller做这些操作
 	netConn.SetDeadline(time.Time{})
 
 	if u.HandshakeTimeout > 0 {
@@ -306,6 +329,7 @@ func Upgrade(w http.ResponseWriter, r *http.Request, responseHeader http.Header,
 
 // Subprotocols returns the subprotocols requested by the client in the
 // Sec-Websocket-Protocol header.
+// 获取客户端header中带的子协议
 func Subprotocols(r *http.Request) []string {
 	h := strings.TrimSpace(r.Header.Get("Sec-Websocket-Protocol"))
 	if h == "" {
@@ -330,6 +354,7 @@ func bufioReaderSize(originalReader io.Reader, br *bufio.Reader) int {
 	// This code assumes that peek on a reset reader returns
 	// bufio.Reader.buf[:0].
 	// TODO: Use bufio.Reader.Size() after Go 1.10
+	// 重置br br从originalReader中读数据
 	br.Reset(originalReader)
 	if p, err := br.Peek(0); err == nil {
 		return cap(p)
