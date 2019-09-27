@@ -26,12 +26,14 @@ func (e HandshakeError) Error() string { return e.message }
 // 描述了将一个http连接升级为websocket连接的详细参数
 type Upgrader struct {
 	// HandshakeTimeout specifies the duration for the handshake to complete.
+	// 描述了连接的超时时间
 	HandshakeTimeout time.Duration
 
 	// ReadBufferSize and WriteBufferSize specify I/O buffer sizes in bytes. If a buffer
 	// size is zero, then buffers allocated by the HTTP server are used. The
 	// I/O buffer sizes do not limit the size of the messages that can be sent
 	// or received.
+	// 制定了io缓冲区的大小，如果未设置，则使用由http服务分配的缓冲区。这个大小对接收或者发送的消息的大小没有限制。
 	ReadBufferSize, WriteBufferSize int
 
 	// WriteBufferPool is a pool of buffers for write operations. If the value
@@ -43,6 +45,7 @@ type Upgrader struct {
 	//
 	// Applications should use a single pool for each unique value of
 	// WriteBufferSize.
+	// 写缓冲区池，如果没有设置，则写缓冲区将在连接周期内分配
 	WriteBufferPool BufferPool
 
 	// Subprotocols specifies the server's supported protocols in order of
@@ -51,6 +54,7 @@ type Upgrader struct {
 	// requested by the client. If there's no match, then no protocol is
 	// negotiated (the Sec-Websocket-Protocol header is not included in the
 	// handshake response).
+	// 服务端支持的子协议，如果非空，则选择客户端提供的列表中第一个匹配到的（权重最高）。
 	Subprotocols []string
 
 	// Error specifies the function for generating HTTP error responses. If Error

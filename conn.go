@@ -643,9 +643,10 @@ func (w *messageWriter) flushFrame(final bool, extra []byte) error {
 		c.writeBuf[framePos+1] = b1 | byte(length)
 	}
 
+	// 判断是不是由客户端发往服务端	如果是，则发送的数据需要掩码操作
 	if !c.isServer {
 		key := newMaskKey()
-		// 如果需要掩码   掩码位置位于payload前4个字节
+		//  掩码位置位于payload前4个字节
 		copy(c.writeBuf[maxFrameHeaderSize-4:], key[:])
 		// 对payload数据进行异或计算
 		maskBytes(key, 0, c.writeBuf[maxFrameHeaderSize:w.pos])
@@ -703,11 +704,13 @@ func (w *messageWriter) ncopy(max int) (int, error) {
 	return n, nil
 }
 
+// 服务端发向客户端（压缩） 客户端发向服务端
 func (w *messageWriter) Write(p []byte) (int, error) {
 	if w.err != nil {
 		return 0, w.err
 	}
 
+	// 服务端发向客户端 且数据长度大于2倍的写缓冲区  为什么长度大于2倍才进行此操作？？
 	if len(p) > 2*len(w.c.writeBuf) && w.c.isServer {
 		// Don't buffer large messages.
 		err := w.flushFrame(false, p)
@@ -787,6 +790,7 @@ func (w *messageWriter) Close() error {
 }
 
 // WritePreparedMessage writes prepared message into connection.
+// 向连接中写入事先准备好的帧数据
 func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 	frameType, frameData, err := pm.frame(prepareKey{
 		isServer:         c.isServer,
@@ -811,7 +815,7 @@ func (c *Conn) WritePreparedMessage(pm *PreparedMessage) error {
 // WriteMessage is a helper method for getting a writer using NextWriter,
 // writing the message and closing the writer.
 func (c *Conn) WriteMessage(messageType int, data []byte) error {
-	// 服务端发向客户端 单帧
+	// 服务端发向客户端 单帧	数据帧或者控制帧   不压缩
 	if c.isServer && (c.newCompressionWriter == nil || !c.enableWriteCompression) {
 		// Fast path with no allocations and single frame.
 
@@ -1004,7 +1008,7 @@ func (c *Conn) advanceFrame() (int, error) {
 
 	switch frameType {
 	case PongMessage:
-		// 客户端ping消息   默认ponghandler直接返回nil
+		// 客户端pong消息   默认ponghandler直接返回nil
 		if err := c.handlePong(string(payload)); err != nil {
 			return noFrame, err
 		}

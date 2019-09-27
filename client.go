@@ -48,6 +48,7 @@ func NewClient(netConn net.Conn, u *url.URL, requestHeader http.Header, readBufS
 }
 
 // A Dialer contains options for connecting to WebSocket server.
+// 包括连接websocket服务器的选项
 type Dialer struct {
 	// NetDial specifies the dial function for creating TCP connections. If
 	// NetDial is nil, net.Dial is used.
@@ -65,9 +66,11 @@ type Dialer struct {
 
 	// TLSClientConfig specifies the TLS configuration to use with tls.Client.
 	// If nil, the default configuration is used.
+	// tls连接的配置
 	TLSClientConfig *tls.Config
 
 	// HandshakeTimeout specifies the duration for the handshake to complete.
+	// tls握手超时时间
 	HandshakeTimeout time.Duration
 
 	// ReadBufferSize and WriteBufferSize specify I/O buffer sizes in bytes. If a buffer
@@ -151,6 +154,7 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 		d = &nilDialer
 	}
 
+	// Sec-WebSocket-Key
 	challengeKey, err := generateChallengeKey()
 	if err != nil {
 		return nil, nil, err
@@ -175,6 +179,7 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 		return nil, nil, errMalformedURL
 	}
 
+	// 创建一个请求  请求方法必须为GET，http版本至少1.1
 	req := &http.Request{
 		Method:     "GET",
 		URL:        u,
@@ -197,10 +202,15 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 	// RFC examples. Although the capitalization shouldn't matter, there are
 	// servers that depend on it. The Header.Set method is not used because the
 	// method canonicalizes the header names.
+	// 请求必须包含一个Upgradeheader字段，它的值必须包含"websocket"
 	req.Header["Upgrade"] = []string{"websocket"}
+	// 请求必须包含一个Connectionheader字段，它的值必须包含"Upgrade"
 	req.Header["Connection"] = []string{"Upgrade"}
+	// 请求必须包含一个名为Sec-WebSocket-Key的header字段 16字节随机数base64编码得到
 	req.Header["Sec-WebSocket-Key"] = []string{challengeKey}
+	// 请求必须包含一个名为Sec-WebSocket-Version的字段。这个header字段的值必须为13。
 	req.Header["Sec-WebSocket-Version"] = []string{"13"}
+	// 如果存在这个字段，那么这个值包含了一个或者多个客户端希望使用的用逗号分隔的根据权重排序的子协议。
 	if len(d.Subprotocols) > 0 {
 		req.Header["Sec-WebSocket-Protocol"] = []string{strings.Join(d.Subprotocols, ", ")}
 	}
@@ -210,6 +220,7 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 			if len(vs) > 0 {
 				req.Host = vs[0]
 			}
+			// 外部传入的自定义header不需要指定这些参数  指定则直接报错返回
 		case k == "Upgrade" ||
 			k == "Connection" ||
 			k == "Sec-Websocket-Key" ||
@@ -217,9 +228,11 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 			k == "Sec-Websocket-Extensions" ||
 			(k == "Sec-Websocket-Protocol" && len(d.Subprotocols) > 0):
 			return nil, nil, errors.New("websocket: duplicate header not allowed: " + k)
+			// 外部自定义header中指定了子协议
 		case k == "Sec-Websocket-Protocol":
 			req.Header["Sec-WebSocket-Protocol"] = vs
 		default:
+			// 外部自定义header指定了上述字段以外的字段  全部复制
 			req.Header[k] = vs
 		}
 	}
@@ -228,6 +241,7 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 		req.Header["Sec-WebSocket-Extensions"] = []string{"permessage-deflate; server_no_context_takeover; client_no_context_takeover"}
 	}
 
+	// 是否设置握手超时时间
 	if d.HandshakeTimeout != 0 {
 		var cancel func()
 		ctx, cancel = context.WithTimeout(ctx, d.HandshakeTimeout)
@@ -325,7 +339,7 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 	}
 
 	conn := newConn(netConn, false, d.ReadBufferSize, d.WriteBufferSize, d.WriteBufferPool, nil, nil)
-
+	// 建立tcp连接后发送http请求
 	if err := req.Write(netConn); err != nil {
 		return nil, nil, err
 	}
@@ -347,6 +361,9 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 		}
 	}
 
+	// 客户端验证服务端响应
+	// 返回状态码为101， upgrade字段为websocket connection字段为upgrade
+	// Sec-WebSocket-Accept字段的值为上文challengeKey的值加"258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 	if resp.StatusCode != 101 ||
 		!strings.EqualFold(resp.Header.Get("Upgrade"), "websocket") ||
 		!strings.EqualFold(resp.Header.Get("Connection"), "upgrade") ||
@@ -383,9 +400,11 @@ func (d *Dialer) DialContext(ctx context.Context, urlStr string, requestHeader h
 }
 
 func doHandshake(tlsConn *tls.Conn, cfg *tls.Config) error {
+	// 进行tls握手连接
 	if err := tlsConn.Handshake(); err != nil {
 		return err
 	}
+	// 是否需要验证服务端的证书链
 	if !cfg.InsecureSkipVerify {
 		if err := tlsConn.VerifyHostname(cfg.ServerName); err != nil {
 			return err

@@ -28,6 +28,7 @@ func computeAcceptKey(challengeKey string) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
+// websocket请求须包含的Sec-WebSocket-Key字段  该函数生成该字段的数据
 func generateChallengeKey() (string, error) {
 	p := make([]byte, 16)
 	if _, err := io.ReadFull(rand.Reader, p); err != nil {
@@ -145,7 +146,7 @@ func nextToken(s string) (token, rest string) {
 // and the string following the token or quoted string.
 func nextTokenOrQuoted(s string) (value string, rest string) {
 	if !strings.HasPrefix(s, "\"") {
-		return nextToken(s)
+		return "", nextToken(s)
 	}
 	s = s[1:]
 	for i := 0; i < len(s); i++ {
